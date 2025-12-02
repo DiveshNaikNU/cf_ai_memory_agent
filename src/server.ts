@@ -1,32 +1,20 @@
 import { routeAgentRequest, type Schedule } from "agents";
-
-import { getSchedulePrompt } from "agents/schedule";
-
 import { AIChatAgent } from "agents/ai-chat-agent";
 import {
   generateId,
   streamText,
   type StreamTextOnFinishCallback,
-  stepCountIs,
   createUIMessageStream,
   convertToModelMessages,
   createUIMessageStreamResponse,
   type ToolSet
 } from "ai";
-import { openai } from "@ai-sdk/openai";
-import { processToolCalls, cleanupMessages } from "./utils";
-import { tools, executions } from "./tools";
-// import { env } from "cloudflare:workers";
-
-const model = openai("gpt-4o-2024-11-20");
-// Cloudflare AI Gateway
-// const openai = createOpenAI({
-//   apiKey: env.OPENAI_API_KEY,
-//   baseURL: env.GATEWAY_BASE_URL,
-// });
+import { createWorkersAI } from "workers-ai-provider";
+import { cleanupMessages } from "./utils";
 
 /**
  * Chat Agent implementation that handles real-time AI chat interactions
+ * Using Cloudflare Workers AI with Llama
  */
 export class Chat extends AIChatAgent<Env> {
   /**
@@ -36,47 +24,33 @@ export class Chat extends AIChatAgent<Env> {
     onFinish: StreamTextOnFinishCallback<ToolSet>,
     _options?: { abortSignal?: AbortSignal }
   ) {
-    // const mcpConnection = await this.mcp.connect(
-    //   "https://path-to-mcp-server/sse"
-    // );
+    // Initialize Workers AI with the AI binding from env
+    const workersai = createWorkersAI({ binding: this.env.AI });
 
-    // Collect all tools, including MCP tools
-    const allTools = {
-      ...tools,
-      ...this.mcp.getAITools()
-    };
+    // @ts-ignore - Model exists but types are not updated
+    const model = workersai("@cf/meta/llama-3.1-8b-instruct");
 
     const stream = createUIMessageStream({
       execute: async ({ writer }) => {
         // Clean up incomplete tool calls to prevent API errors
         const cleanedMessages = cleanupMessages(this.messages);
 
-        // Process any pending tool calls from previous messages
-        // This handles human-in-the-loop confirmations for tools
-        const processedMessages = await processToolCalls({
-          messages: cleanedMessages,
-          dataStream: writer,
-          tools: allTools,
-          executions
-        });
-
         const result = streamText({
-          system: `You are a helpful assistant that can do various tasks... 
+          system: `You are a friendly and helpful AI assistant powered by Llama running on Cloudflare Workers AI.
 
-${getSchedulePrompt({ date: new Date() })}
+Guidelines:
+- Be conversational, warm, and helpful
+- Give direct, informative answers to questions
+- If someone greets you, greet them back warmly
+- Keep responses concise but informative
+- You can help with general knowledge, coding, math, writing, explanations, and more
+- Always provide a substantive response
 
-If the user asks to schedule a task, use the schedule tool to schedule the task.
+Current date: ${new Date().toLocaleDateString()}
 `,
-
-          messages: convertToModelMessages(processedMessages),
+          messages: convertToModelMessages(cleanedMessages),
           model,
-          tools: allTools,
-          // Type boundary: streamText expects specific tool types, but base class uses ToolSet
-          // This is safe because our tools satisfy ToolSet interface (verified by 'satisfies' in tools.ts)
-          onFinish: onFinish as unknown as StreamTextOnFinishCallback<
-            typeof allTools
-          >,
-          stopWhen: stepCountIs(10)
+          onFinish: onFinish as unknown as StreamTextOnFinishCallback<ToolSet>
         });
 
         writer.merge(result.toUIMessageStream());
@@ -85,6 +59,7 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
 
     return createUIMessageStreamResponse({ stream });
   }
+
   async executeTask(description: string, _task: Schedule<string>) {
     await this.saveMessages([
       ...this.messages,
@@ -106,25 +81,21 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
 }
 
 /**
- * Worker entry point that routes incoming requests to the appropriate handler
+ * Worker entry point
  */
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext) {
     const url = new URL(request.url);
 
     if (url.pathname === "/check-open-ai-key") {
-      const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
       return Response.json({
-        success: hasOpenAIKey
+        success: true,
+        provider: "workers-ai",
+        model: "llama-3.1-8b"
       });
     }
-    if (!process.env.OPENAI_API_KEY) {
-      console.error(
-        "OPENAI_API_KEY is not set, don't forget to set it locally in .dev.vars, and use `wrangler secret bulk .dev.vars` to upload it to production"
-      );
-    }
+
     return (
-      // Route the request to our agent or return 404 if not found
       (await routeAgentRequest(request, env)) ||
       new Response("Not found", { status: 404 })
     );

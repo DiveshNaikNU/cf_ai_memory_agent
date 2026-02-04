@@ -6,8 +6,6 @@ An AI-powered conversational agent with persistent memory, built on Cloudflare's
 
 **[https://cloudflare-ai-agent.iamdiv99.workers.dev](https://cloudflare-ai-agent.iamdiv99.workers.dev)**
 
-## ✅ Assignment Requirements
-
 | Requirement | Implementation |
 |-------------|----------------|
 | **LLM** | Llama 3.1 8B via Cloudflare Workers AI |

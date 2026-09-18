@@ -73,7 +73,7 @@ cf_ai_memory_agent/
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/cf_ai_memory_agent.git
+git clone https://github.com/DiveshNaikNU/cf_ai_memory_agent.git
 cd cf_ai_memory_agent
 
 # Install dependencies
